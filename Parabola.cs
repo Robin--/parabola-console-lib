@@ -15,6 +15,7 @@ namespace ParabolaConsoleLib{
 		private static int W;
 		public static bool linux;
 		public static ConsoleColor defaultcolor = ConsoleColor.Gray;
+		public static bool wordwrap = false;
 		private static bool terminal_bold = false; //for use on linux terminals
 		private static readonly string bold_on = (char)27 + "[1m"; //VT100 codes, sweet
 		private static readonly string bold_off = (char)27 + "[m";
@@ -176,11 +177,15 @@ namespace ParabolaConsoleLib{
 				++line;
 			}
 		}
-		public static void Write(int r,int c,string s){ Write(r,c,new colorstringpart(s,defaultcolor)); }
-		public static void Write(int r,int c,string s,ConsoleColor color){ Write(r,c,new colorstringpart(s,color)); }
-		public static void Write(int r,int c,colorstringpart s){
-			if(s.s.Length > W - c){
-				s.s = s.s.Substring(0,W - c);
+		public static void Write(int r,int c,string s){ Write(r,c,new colorstringpart(s,defaultcolor),0,W,H-1); }
+		public static void Write(int r,int c,string s,ConsoleColor color){ Write(r,c,new colorstringpart(s,color),0,W,H-1); }
+		public static void Write(int r,int c,colorstringpart s){ Write(r,c,s,0,W,H-1); }
+		public static void Write(int r,int c,colorstringpart s,int left_border,int width,int bottom_border){
+			colorstringpart wrapped = new colorstringpart("",defaultcolor);
+			bool carriage_return = false;
+			int available_space = (left_border + width) - c;
+			if(r == H-1){
+				--available_space; //this prevents Parabola from printing to the bottom right corner, which would scroll the screen.
 			}
 			if(s.s.Length > 0){
 				colorchar cch;
@@ -192,29 +197,68 @@ namespace ParabolaConsoleLib{
 				if(BackgroundColor != s.bgcolor){
 					BackgroundColor = s.bgcolor;
 				}
+				string print_string = s.s;
 				int i = 0;
 				bool changed = false;
 				foreach(char ch in s.s){
-					cch.c = ch;
-					if(!memory[r,c+i].Equals(cch)){
-						memory[r,c+i] = cch;
-						changed = true;
+					if(ch == '\r' || ch == '\n'){
+						print_string = s.s.Substring(0,i);
+						wrapped.s = s.s.Substring(i+1);
+						wrapped.bgcolor = s.bgcolor;
+						wrapped.color = s.color;
+						if(ch == '\r'){
+							carriage_return = true;
+						}
+						break;
 					}
-					++i;
+					else{
+						if(i >= available_space){
+							if(wordwrap){
+								wrapped.s = s.s.Substring(i);
+								wrapped.bgcolor = s.bgcolor;
+								wrapped.color = s.color;
+							}
+							print_string = s.s.Substring(0,i);
+							break;
+						}
+						else{
+							cch.c = ch;
+							if(!memory[r,c+i].Equals(cch)){
+								memory[r,c+i] = cch;
+								changed = true;
+							}
+							++i;
+						}
+					}
 				}
 				if(changed){
 					Console.SetCursorPosition(c,r);
-					Console.Write(s.s);
+					Console.Write(print_string);
+				}
+			}
+			if(wrapped.s.Length > 0){
+				if(carriage_return){
+					Write(r,left_border,wrapped,left_border,width,bottom_border);
+				}
+				else{
+					if(r < bottom_border){
+						Write(r+1,left_border,wrapped,left_border,width,bottom_border);
+					}
 				}
 			}
 		}
-		public static void Write(int r,int c,colorstring cs){
+		public static void Write(int r,int c,colorstring cs){ Write(r,c,cs,0,W,H-1); }
+		public static void Write(int r,int c,colorstring cs,int left_border,int width,int bottom_border){
 			if(cs.Length() > 0){
-				int pos = c;
+				int row = r;
+				int col = c;
 				foreach(colorstringpart s1 in cs.strings){
 					colorstringpart s = new colorstringpart(s1.s,s1.color,s1.bgcolor);
-					if(s.s.Length + pos > W){
-						s.s = s.s.Substring(0,W - pos);
+					colorstringpart wrapped = new colorstringpart("",defaultcolor);
+					bool carriage_return = false;
+					int available_space = (left_border + width) - col;
+					if(row == H-1){
+						--available_space; //this prevents Parabola from printing to the bottom right corner, which would scroll the screen.
 					}
 					colorchar cch;
 					cch.color = s.color;
@@ -225,21 +269,87 @@ namespace ParabolaConsoleLib{
 					if(BackgroundColor != s.bgcolor){
 						BackgroundColor = s.bgcolor;
 					}
+					string print_string = s.s;
 					int i = 0;
 					bool changed = false;
+					bool last_char_was_NL_or_CR = false;
 					foreach(char ch in s.s){
-						cch.c = ch;
-						if(!memory[r,pos+i].Equals(cch)){
-							memory[r,pos+i] = cch;
-							changed = true;
+						if(ch == '\r' || ch == '\n'){
+							print_string = s.s.Substring(0,i);
+							wrapped.s = s.s.Substring(i+1);
+							if(wrapped.s.Length == 0){
+								last_char_was_NL_or_CR = true;
+							}
+							wrapped.bgcolor = s.bgcolor;
+							wrapped.color = s.color;
+							if(ch == '\r'){
+								carriage_return = true;
+							}
+							break;
 						}
-						++i;
+						else{
+							if(i >= available_space){
+								if(wordwrap){
+									wrapped.s = s.s.Substring(i);
+									wrapped.bgcolor = s.bgcolor;
+									wrapped.color = s.color;
+								}
+								print_string = s.s.Substring(0,i);
+								break;
+							}
+							else{
+								cch.c = ch;
+								if(!memory[row,col+i].Equals(cch)){
+									memory[row,col+i] = cch;
+									changed = true;
+								}
+								++i;
+							}
+						}
 					}
 					if(changed){
-						Console.SetCursorPosition(pos,r);
-						Console.Write(s.s);
+						Console.SetCursorPosition(col,row);
+						Console.Write(print_string);
 					}
-					pos += s.s.Length;
+					col += print_string.Length;
+					if(wrapped.s.Length > 0){
+						if(carriage_return){
+							Write(row,left_border,wrapped,left_border,width,bottom_border);
+							col = left_border + wrapped.s.Length;
+						}
+						else{
+							if(row < bottom_border){
+								++row;
+								Write(row,left_border,wrapped,left_border,width,bottom_border);
+								col = left_border + wrapped.s.Length;
+							}
+						}
+					}
+					else{
+						if(last_char_was_NL_or_CR){
+							if(carriage_return){
+								col = left_border;
+							}
+							else{
+								if(row < bottom_border){
+									++row;
+									col = left_border;
+								}
+							}
+						}
+					}
+					if(col >= left_border + width){
+						if(wordwrap){
+							++row;
+							col = left_border;
+							if(row > bottom_border){
+								break;
+							}
+						}
+						else{
+							break;
+						}
+					}
 				}
 			}
 		}
@@ -334,13 +444,13 @@ namespace ParabolaConsoleLib{
 		public void Write(int r,int c,List<colorstring> ls){
 			Screen.Write(row+r,col+c,ls);
 		}
-		public void Write(int r,int c,string s){ Screen.Write(row+r,col+c,new colorstringpart(s,defaultcolor)); }
-		public void Write(int r,int c,string s,ConsoleColor color){ Screen.Write(row+r,col+c,new colorstringpart(s,color)); }
+		public void Write(int r,int c,string s){ Screen.Write(row+r,col+c,new colorstringpart(s,defaultcolor),col,W,(row+H)-1); }
+		public void Write(int r,int c,string s,ConsoleColor color){ Screen.Write(row+r,col+c,new colorstringpart(s,color),col,W,(row+H)-1); }
 		public void Write(int r,int c,colorstringpart s){
-			Screen.Write(row+r,col+c,s);
+			Screen.Write(row+r,col+c,s,col,W,(row+H)-1);
 		}
 		public void Write(int r,int c,colorstring cs){
-			Screen.Write(row+r,col+c,cs);
+			Screen.Write(row+r,col+c,cs,col,W,(row+H)-1);
 		}
 		public void DrawRectangularPartOfArray(colorchar[,] array,int row,int col,int height,int width){
 			Screen.DrawRectangularPartOfArray(array,this.row+row,this.col+col,height,width);
